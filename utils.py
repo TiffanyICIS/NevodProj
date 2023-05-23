@@ -58,9 +58,14 @@ def get_igrf_field(lat, lon, alt, date):
     _, _, _, B_north, B_east, B_down, B_total = igrf_value(lat, lon, alt_km, decimal_year)
     return B_north / 1e9, B_east / 1e9, B_down / 1e9
 
-def geodetic_to_ecef(lat, lon, alt):
-    transformer = Transformer.from_crs("EPSG:4326", "EPSG:4978")
-    x, y, z = transformer.transform(lat, lon, alt)
+def geog_to_cartesian(latitude, longitude, radius=1.0):
+    lat_rad = math.radians(latitude)
+    lon_rad = math.radians(longitude)
+
+    x = radius * math.cos(lat_rad) * math.cos(lon_rad)
+    y = radius * math.cos(lat_rad) * math.sin(lon_rad)
+    z = radius * math.sin(lat_rad)
+
     return x, y, z
 
 def runge_kutta_step(func, y, t, dt, *args, **kwargs):
@@ -79,10 +84,9 @@ def compute_trajectory(y0, t0, dt, steps, func, *args, **kwargs):
         t += dt
     return y
 
-def particle_motion(t, state, mass, charge, B):
+def particle_motion(t, state, mass, charge, Bx, By, Bz):
     x, y, z, vx, vy, vz = state
-    # lat, lon, alt_km = cartesian_to_geodetic(x, y, z)
-    # B = np.array([Bx(lat, lon, alt_km), By(lat, lon, alt_km), Bz(lat, lon, alt_km)])
+    B = np.array([Bx(x, y, z), By(x, y, z), Bz(x, y, z)])
     v = np.array([vx, vy, vz])
     force = charge * np.cross(v, B) / mass
     ax, ay, az = force
@@ -107,7 +111,7 @@ def visualize_trajectory(trajectory):
 
     ax.plot(x_fine, y_fine, z_fine, 'r-', linewidth=2)
 
-    ax.set_title('Muon Trajectory')
+    ax.set_title('Particle Trajectory')
     ax.set_xlabel('X (m)')
     ax.set_ylabel('Y (m)')
     ax.set_zlabel('Z (m)')
