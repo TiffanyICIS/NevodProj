@@ -16,5 +16,9 @@ for energy in p_energy:
     visualize_trajectory(trajectory)
 
 
+# я хз как шар добавить ес че
+# вова лох
+
+
 
 
