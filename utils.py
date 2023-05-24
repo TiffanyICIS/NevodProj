@@ -1,37 +1,47 @@
 import numpy as np
 from pyIGRF import igrf_value
+from mpl_toolkits import mplot3d
 from pyproj import Transformer
 import matplotlib.pyplot as plt
 from scipy.interpolate import splprep, splev
 import math
 
 #GS84 ellipsoid model
-def cartesian_to_geodetic(x, y, z):
-    a = 6378137.0
-    f = 1 / 298.257223563
-    b = a * (1 - f)
-    e = math.sqrt(f * (2 - f))
 
-    lon = math.atan2(y, x)
+def cartesian_to_geodetic_eberly(x, y, z):
+    # Constants for WGS84 ellipsoid model of the Earth
+    a = 6378137.0  # semi-major axis
+    f = 1 / 298.257223563  # inverse flattening
+    e2 = f * (2 - f)  # square of eccentricity
 
-    p = math.sqrt(x**2 + y**2)
-    E = math.sqrt(a**2 - b**2)
-    F = 54 * b**2 * z**2
-    G = p**2 + (1 - e**2) * z**2 - e**2 * E**2
-    c = (e**4 * F * p**2) / (G**3)
-    s = (1 + c + math.sqrt(c**2 + 2 * c))**(1/3)
-    P = F / (3 * (s + 1/s + 1)**2 * G**2)
-    Q = math.sqrt(1 + 2 * e**4 * P)
-    r_0 = -(P * e**2 * p) / (1 + Q) + math.sqrt(0.5 * a**2 * (1 + 1/Q) - P * (1 - e**2) * z**2 / (Q * (1 + Q)) - 0.5 * P * p**2)
-    U = math.sqrt((p - e**2 * r_0)**2 + z**2)
-    V = math.sqrt((p - e**2 * r_0)**2 + (1 - e**2) * z**2)
-    z_0 = (b**2 * z) / (a * V)
-    height = U * (1 - b**2 / (a * V))
-    if p < 1e-10:
-        lat = math.pi / 2 if z > 0 else -math.pi / 2
-    else:
-        lat = math.atan((z + e ** 2 * z_0) / p)
+    lon = math.atan2(y, x)  # longitude is easy
 
+    # Prepare for iterative solution for latitude and height
+    r = math.sqrt(x*x + y*y + z*z)  # radial distance from Earth's center
+    esinz = a * e2 * z / r  # e * sin(z), used in iteration
+
+    # Iterative calculation of latitude and height
+    p = x*x + y*y  # squared horizontal projection of the radial vector
+    q = z*z * (1 - e2)  # adjusted squared vertical projection
+    r = (p - q) / (6 * esinz)
+    s = (p + q) / (6 * esinz)
+    t = math.sqrt(r*r + s*s)
+    u = math.pow(((s + t + r) / 3), (1 / 3))
+    v = math.pow(((s + t - r) / 3), (1 / 3))
+    w = math.sqrt(u*u + v*v + q / (4 * esinz))
+    k = math.sqrt(u*u + v*v + w*w)
+
+    # Final calculations for latitude and height
+    e = (k - w) / (2 * k)
+    f = (k + w) / (2 * k * k + w + e / 2)
+    g = 1 - 2 * e * w / k
+    h = 2 * (k - e) * f
+    sinz = h * (1 - f)
+    cosz = g * f
+    lat = math.atan(sinz / cosz)
+    height = (r * sinz + t * cosz) / math.sqrt(e2)
+
+    # Convert to degrees and kilometers
     lat = math.degrees(lat)
     lon = math.degrees(lon)
     height /= 1000
@@ -86,7 +96,8 @@ def compute_trajectory(y0, t0, dt, steps, func, *args, **kwargs):
 
 def particle_motion(t, state, mass, charge, Bx, By, Bz):
     x, y, z, vx, vy, vz = state
-    B = np.array([Bx(x, y, z), By(x, y, z), Bz(x, y, z)])
+    lat, lon, alt_km = cartesian_to_geodetic_eberly(x, y, z)
+    B = np.array([Bx(lat, lon, alt_km), By(lat, lon, alt_km), Bz(lat, lon, alt_km)])
     v = np.array([vx, vy, vz])
     force = charge * np.cross(v, B) / mass
     ax, ay, az = force
@@ -103,26 +114,33 @@ def visualize_trajectory(trajectory):
     print(z, z.shape)
 
     fig = plt.figure(figsize=(10, 10))
-    ax = fig.add_subplot(111, projection='3d')
+    fig = plt.figure(figsize = (10, 7))
+    ax = plt.axes(projection ="3d")
 
-    tck, u = splprep([x, y, z], s=0)
-    u_fine = np.linspace(0, 1, len(x) * 10)
-    x_fine, y_fine, z_fine = splev(u_fine, tck)
+    # Creating plot
+    ax.scatter3D(x, y, z, color='#ff0000', s=40)
+    plt.show()
+    # ax = fig.add_subplot(111, projection='3d')
+    #
+    # tck, u = splprep([x, y, z], s=0)
+    # u_fine = np.linspace(0, 1, len(x) * 10)
+    # x_fine, y_fine, z_fine = splev(u_fine, tck)
+    #
+    # ax.plot(x_fine, y_fine, z_fine, 'r-', linewidth=2)
+    #
+    # ax.set_title('Particle Trajectory')
+    # ax.set_xlabel('X (m)')
+    # ax.set_ylabel('Y (m)')
+    # ax.set_zlabel('Z (m)')
+    #
+    # max_range = np.array([x.max()-x.min(), y.max()-y.min(), z.max()-z.min()]).max() / 2.0
+    # mid_x = (x.max()+x.min()) * 0.5
+    # mid_y = (y.max()+y.min()) * 0.5
+    # mid_z = (z.max()+z.min()) * 0.5
+    # ax.set_xlim(mid_x - max_range, mid_x + max_range)
+    # ax.set_ylim(mid_y - max_range, mid_y + max_range)
+    # ax.set_zlim(mid_z - max_range, mid_z + max_range)
 
-    ax.plot(x_fine, y_fine, z_fine, 'r-', linewidth=2)
-
-    ax.set_title('Particle Trajectory')
-    ax.set_xlabel('X (m)')
-    ax.set_ylabel('Y (m)')
-    ax.set_zlabel('Z (m)')
-
-    max_range = np.array([x.max()-x.min(), y.max()-y.min(), z.max()-z.min()]).max() / 2.0
-    mid_x = (x.max()+x.min()) * 0.5
-    mid_y = (y.max()+y.min()) * 0.5
-    mid_z = (z.max()+z.min()) * 0.5
-    ax.set_xlim(mid_x - max_range, mid_x + max_range)
-    ax.set_ylim(mid_y - max_range, mid_y + max_range)
-    ax.set_zlim(mid_z - max_range, mid_z + max_range)
 
     plt.show()
 
